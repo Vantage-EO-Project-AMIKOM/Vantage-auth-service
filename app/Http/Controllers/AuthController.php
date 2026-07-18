@@ -6,9 +6,32 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
 
 class AuthController extends Controller
 {
+    public function register(Request $request)
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'email', 'max:255', 'unique:users,email'],
+            'password' => ['required', 'confirmed', Password::min(8)],
+        ]);
+
+        $user = User::create([
+            ...$data,
+            'role' => 'user',
+        ]);
+
+        $token = $user->createToken('auth-token')->plainTextToken;
+
+        return response()->json([
+            'message' => 'Account created successfully',
+            'token' => $token,
+            'user' => $this->userData($user),
+        ], 201);
+    }
+
     public function login(Request $request)
     {
         $request->validate([
@@ -28,12 +51,7 @@ class AuthController extends Controller
 
         return response()->json([
             'token' => $token,
-            'user'  => [
-                'id'    => $user->id,
-                'name'  => $user->name,
-                'email' => $user->email,
-                'role'  => $user->role,
-            ]
+            'user' => $this->userData($user),
         ]);
     }
 
@@ -48,6 +66,11 @@ class AuthController extends Controller
 
     public function me(Request $request)
     {
-        return response()->json($request->user());
+        return response()->json($this->userData($request->user()));
+    }
+
+    private function userData(User $user): array
+    {
+        return $user->only(['id', 'name', 'email', 'role']);
     }
 }
