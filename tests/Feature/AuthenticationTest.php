@@ -31,7 +31,7 @@ class AuthenticationTest extends TestCase
 
         $response->assertCreated()
             ->assertJsonPath('user.role', 'user')
-            ->assertJsonStructure(['token', 'user' => ['id', 'name', 'email', 'role']]);
+            ->assertJsonStructure(['token', 'expires_at', 'user' => ['id', 'name', 'email', 'role']]);
 
         $this->assertDatabaseHas('users', [
             'email' => 'user@example.com',
@@ -51,6 +51,26 @@ class AuthenticationTest extends TestCase
         $this->postJson('/api/login', [
             'email' => 'user@example.com',
             'password' => 'password123',
-        ])->assertOk()->assertJsonPath('user.role', 'user')->assertJsonStructure(['token']);
+        ])->assertOk()->assertJsonPath('user.role', 'user')->assertJsonStructure(['token', 'expires_at']);
+    }
+
+    public function test_login_revokes_the_users_previous_token(): void
+    {
+        $user = User::create([
+            'name' => 'Vantage User',
+            'email' => 'user@example.com',
+            'password' => 'password123',
+            'role' => 'user',
+        ]);
+        $oldToken = $user->createToken('old-token')->plainTextToken;
+
+        $newToken = $this->postJson('/api/login', [
+            'email' => 'user@example.com',
+            'password' => 'password123',
+        ])->assertOk()->json('token');
+
+        $this->withToken($oldToken)->getJson('/api/me')->assertUnauthorized();
+        $this->withToken($newToken)->getJson('/api/me')->assertOk();
+        $this->assertCount(1, $user->fresh()->tokens);
     }
 }

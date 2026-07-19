@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules\Password;
@@ -20,14 +19,15 @@ class AuthController extends Controller
 
         $user = User::create([
             ...$data,
+            'email' => strtolower($data['email']),
             'role' => 'user',
         ]);
 
-        $token = $user->createToken('auth-token')->plainTextToken;
+        $token = $this->issueToken($user);
 
         return response()->json([
             'message' => 'Account created successfully',
-            'token' => $token,
+            ...$token,
             'user' => $this->userData($user),
         ], 201);
     }
@@ -35,11 +35,11 @@ class AuthController extends Controller
     public function login(Request $request)
     {
         $request->validate([
-            'email'    => 'required|email',
-            'password' => 'required',
+            'email' => ['required', 'email', 'max:255'],
+            'password' => ['required', 'string'],
         ]);
 
-        $user = User::where('email', $request->email)->first();
+        $user = User::where('email', strtolower($request->email))->first();
 
         if (!$user || !Hash::check($request->password, $user->password)) {
             return response()->json([
@@ -47,10 +47,13 @@ class AuthController extends Controller
             ], 401);
         }
 
-        $token = $user->createToken('auth-token')->plainTextToken;
+        // A user may have only one active API session. This immediately
+        // invalidates forgotten, copied, or previously issued tokens.
+        $user->tokens()->delete();
+        $token = $this->issueToken($user);
 
         return response()->json([
-            'token' => $token,
+            ...$token,
             'user' => $this->userData($user),
         ]);
     }
@@ -72,5 +75,17 @@ class AuthController extends Controller
     private function userData(User $user): array
     {
         return $user->only(['id', 'name', 'email', 'role']);
+    }
+
+    private function issueToken(User $user): array
+    {
+        $expirationMinutes = (int) config('sanctum.expiration', 120);
+        $expiresAt = now()->addMinutes($expirationMinutes);
+        $token = $user->createToken('auth-token', ['*'], $expiresAt);
+
+        return [
+            'token' => $token->plainTextToken,
+            'expires_at' => $expiresAt->toIso8601String(),
+        ];
     }
 }
